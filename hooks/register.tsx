@@ -156,9 +156,9 @@ const ddmm = (ms: number) => {
 }
 
 const LIMIT_LABEL: Record<string, string> = {
-  five_hour: 'Janela 5h',
-  seven_day: 'Semanal',
-  spend_limit: 'Gasto',
+  five_hour: '5h window',
+  seven_day: 'Weekly',
+  spend_limit: 'Spend',
 }
 
 const until = (resetsAt: string | undefined, now: number) => {
@@ -169,7 +169,7 @@ const until = (resetsAt: string | undefined, now: number) => {
   const h = Math.floor((min % 1440) / 60)
   const m = min % 60
 
-  return ` · reseta em ${d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h${String(m).padStart(2, '0')}` : `${m}min`}`
+  return ` · resets in ${d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h${String(m).padStart(2, '0')}` : `${m}min`}`
 }
 
 const limitColor = (used: number) => (used >= 85 ? 'red' : used >= 60 ? 'yellow' : 'green')
@@ -275,19 +275,19 @@ export const register: Register = on => {
 
       return (
         <Box flexDirection="column">
-          <Text>  Lidos    {fmt(readTotal)}</Text>
-          <Text dimColor>    sem cache   {fmt(x.input)}</Text>
+          <Text>  Read     {fmt(readTotal)}</Text>
+          <Text dimColor>    uncached    {fmt(x.input)}</Text>
           <Text dimColor>    cache read  {fmt(x.cacheRead)}</Text>
           <Text dimColor>    cache write {fmt(x.cacheWrite)}</Text>
-          <Text>  Escritos {fmt(x.output)}</Text>
+          <Text>  Written  {fmt(x.output)}</Text>
           <Text>  Total    {fmt(readTotal + x.output)}</Text>
-          <Text color="cyan">  Custo    {money(x.usd)} (estimado, preço de API)</Text>
+          <Text color="cyan">  Cost     {money(x.usd)} (estimated, API pricing)</Text>
           {x.unpricedModels.length > 0 && (
-            <Text dimColor>    sem preço: {x.unpricedModels.join(', ')}</Text>
+            <Text dimColor>    unpriced: {x.unpricedModels.join(', ')}</Text>
           )}
           <Text dimColor>
             {'  '}
-            {x.turns} respostas da API · {note}
+            {x.turns} API responses · {note}
           </Text>
         </Box>
       )
@@ -295,37 +295,37 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="column">
-        <Text bold>Sessão atual</Text>
+        <Text bold>Current session</Text>
         {block(
           t,
-          `inclui subagentes · ${from === 'transcript' ? 'transcript' : from === 'saved' ? 'salvo' : 'desde que o mod carregou'}`,
+          `includes subagents · ${from === 'transcript' ? 'transcript' : from === 'saved' ? 'saved' : 'since the mod loaded'}`,
         )}
         <Text> </Text>
-        <Text bold>Semanal{wk ? ` (desde ${ddmm(wk.since)})` : ''}</Text>
+        <Text bold>Weekly{wk ? ` (since ${ddmm(wk.since)})` : ''}</Text>
         {wk ? (
-          block(wk.totals, `todos os projetos · atualizado ${ddmm(wk.at)}`)
+          block(wk.totals, `all projects · updated ${ddmm(wk.at)}`)
         ) : (
-          <Text dimColor>  calculando…</Text>
+          <Text dimColor>  calculating…</Text>
         )}
         <Text> </Text>
-        <Text bold>Janela</Text>
+        <Text bold>Context window</Text>
         {w === null || w.tokens === null ? (
-          <Text dimColor>  aguardando 1ª resposta</Text>
+          <Text dimColor>  waiting for first response</Text>
         ) : (
           <Text color={(w.percent ?? 0) >= 85 ? 'red' : (w.percent ?? 0) >= 60 ? 'yellow' : 'green'}>
             {'  '}
             {fmt(w.tokens)} / {fmt(w.size)} ({w.percent ?? 0}%)
           </Text>
         )}
-        {cost !== null && <Text dimColor>  /cost deste processo {money(cost)}</Text>}
+        {cost !== null && <Text dimColor>  /cost for this process {money(cost)}</Text>}
         <Text> </Text>
-        <Text bold>Limites</Text>
-        {rate.length === 0 && <Text dimColor>  sem leitura ainda</Text>}
+        <Text bold>Limits</Text>
+        {rate.length === 0 && <Text dimColor>  no reading yet</Text>}
         {rate.map(l => (
           <Text color={limitColor(l.percentUsed)}>
             {'  '}
-            {LIMIT_LABEL[l.kind] ?? l.kind}: {Math.max(0, Math.round((100 - l.percentUsed) * 10) / 10)}% livre (
-            {l.percentUsed}% usado){until(l.resetsAt, now)}
+            {LIMIT_LABEL[l.kind] ?? l.kind}: {Math.max(0, Math.round((100 - l.percentUsed) * 10) / 10)}% free (
+            {l.percentUsed}% used){until(l.resetsAt, now)}
           </Text>
         ))}
       </Box>

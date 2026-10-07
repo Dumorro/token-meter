@@ -56,18 +56,18 @@ describe('token-meter', () => {
           view: {},
         },
       })
-      expect((await ui.find({ type: 'Text', text: /^ {2}Lidos/ }))?.text).toContain('5.7k')
-      expect((await ui.find({ type: 'Text', text: /^ {2}Escritos/ }))?.text).toContain('500')
+      expect((await ui.find({ type: 'Text', text: /^ {2}Read/ }))?.text).toContain('5.7k')
+      expect((await ui.find({ type: 'Text', text: /^ {2}Written/ }))?.text).toContain('500')
       expect((await ui.find({ type: 'Text', text: /^ {2}Total/ }))?.text).toContain('6.2k')
       expect((await ui.find({ type: 'Text', text: /%\)$/ }))?.text).toContain('25%')
-      expect((await ui.find({ type: 'Text', text: /^ {2}Custo/ }))?.text).toContain('$0.01')
-      const five = (await ui.find({ type: 'Text', text: /^ {2}Janela 5h/ }))?.text ?? ''
-      expect(five).toContain('76.5% livre')
-      expect(five).toContain('23.5% usado')
-      expect(five).toContain('reseta em 2h13')
-      const week = (await ui.find({ type: 'Text', text: /^ {2}Semanal/ }))?.text ?? ''
-      expect(week).toContain('39% livre')
-      expect(week).toContain('reseta em 3d 4h')
+      expect((await ui.find({ type: 'Text', text: /^ {2}Cost/ }))?.text).toContain('$0.01')
+      const five = (await ui.find({ type: 'Text', text: /^ {2}5h window/ }))?.text ?? ''
+      expect(five).toContain('76.5% free')
+      expect(five).toContain('23.5% used')
+      expect(five).toContain('resets in 2h13')
+      const week = (await ui.find({ type: 'Text', text: /^ {2}Weekly/ }))?.text ?? ''
+      expect(week).toContain('39% free')
+      expect(week).toContain('resets in 3d 4h')
       await ui.unmount()
     }
   })

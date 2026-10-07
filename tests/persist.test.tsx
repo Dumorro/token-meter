@@ -98,16 +98,16 @@ describe('token-meter persistence', () => {
     await clock.settle()
 
     const text = await shown($)
-    const [session, weekly] = text.split('Semanal (desde ')
-    expect(session).toContain('Lidos    14.93M')
-    expect(session).toContain('Escritos 68.8k')
-    expect(session).toContain('Custo    $7.80 (estimado, preço de API)')
-    expect(session).toContain('86 respostas da API · inclui subagentes · transcript')
-    expect(weekly).toContain('Lidos    3.13B')
+    const [session, weekly] = text.split('Weekly (since ')
+    expect(session).toContain('Read     14.93M')
+    expect(session).toContain('Written  68.8k')
+    expect(session).toContain('Cost     $7.80 (estimated, API pricing)')
+    expect(session).toContain('86 API responses · includes subagents · transcript')
+    expect(weekly).toContain('Read     3.13B')
     expect(weekly).toContain('Total    3.13B')
-    expect(weekly).toContain('Custo    $1116.65')
-    expect(weekly).toContain('14449 respostas da API · todos os projetos')
-    expect(weekly).not.toContain('sem preço')
+    expect(weekly).toContain('Cost     $1116.65')
+    expect(weekly).toContain('14449 API responses · all projects')
+    expect(weekly).not.toContain('unpriced')
 
     const jq = argvs.find(a => a[0] === 'jq')
     expect(jq?.slice(-2)).toEqual([`${DIR}/${SID}.jsonl`, `${DIR}/${SID}/subagents/agent-a.jsonl`])
@@ -135,14 +135,14 @@ describe('token-meter persistence', () => {
     await clock.settle()
 
     const text = await shown($)
-    const [session, weekly] = text.split('Semanal (desde ')
-    expect(session).toContain('Lidos    2.5k')
-    expect(session).toContain('Escritos 300')
+    const [session, weekly] = text.split('Weekly (since ')
+    expect(session).toContain('Read     2.5k')
+    expect(session).toContain('Written  300')
     // Totals saved before cost existed show $0.00 rather than failing.
-    expect(session).toContain('Custo    $0.00')
-    expect(session).toContain('4 respostas da API · inclui subagentes · salvo')
-    expect(weekly).toContain('Lidos    9.0k')
-    expect(weekly).toContain('Custo    $0.50')
+    expect(session).toContain('Cost     $0.00')
+    expect(session).toContain('4 API responses · includes subagents · saved')
+    expect(weekly).toContain('Read     9.0k')
+    expect(weekly).toContain('Cost     $0.50')
   })
 
   test('a model without a price is named instead of counted as free', async ($, on) => {
@@ -151,8 +151,8 @@ describe('token-meter persistence', () => {
     try {
       await start($)
       await clock.settle()
-      const weekly = (await shown($)).split('Semanal (desde ')[1] ?? ''
-      expect(weekly).toContain('sem preço: claude-unknown-9')
+      const weekly = (await shown($)).split('Weekly (since ')[1] ?? ''
+      expect(weekly).toContain('unpriced: claude-unknown-9')
     } finally {
       WEEK_ROWS.pop()
     }
