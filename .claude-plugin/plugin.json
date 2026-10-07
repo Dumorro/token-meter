@@ -1,0 +1,9 @@
+{
+  "name": "token-meter",
+  "version": "0.1.0",
+  "description": "Live pane with tokens read, written and the context window fill",
+  "author": {
+    "name": "dumorro"
+  },
+  "types": "./types/index.d.ts"
+}

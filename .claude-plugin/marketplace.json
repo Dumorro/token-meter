@@ -1,0 +1,13 @@
+{
+  "name": "token-meter",
+  "description": "Token meter mod for Claude Code: live pane with tokens and context window fill",
+  "owner": {
+    "name": "dumorro"
+  },
+  "plugins": [
+    {
+      "name": "token-meter",
+      "source": "./"
+    }
+  ]
+}
