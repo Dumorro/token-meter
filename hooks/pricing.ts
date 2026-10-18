@@ -1,6 +1,8 @@
 // US$ per million tokens, Anthropic first-party list prices (claude-api skill, cached 2026-09-25).
 // Cache writes are 1.25x input (5 min) and 2x input (1 h); cache reads are 0.1x input except
 // where a model sets its own rate.
+import type { Family } from '../types'
+
 type Rate = { input: number; output: number; cacheRead: number }
 
 const RATES: [prefix: string, rate: Rate][] = [
@@ -18,6 +20,12 @@ const RATES: [prefix: string, rate: Rate][] = [
   ['claude-sonnet-4-6', { input: 3, output: 15, cacheRead: 0.3 }],
   ['claude-haiku-4-5', { input: 1, output: 5, cacheRead: 0.1 }],
 ]
+
+// Display order of the per-family cost lines; anything else falls under 'other'.
+export const FAMILIES: Family[] = ['fable', 'opus', 'sonnet', 'haiku', 'other']
+
+export const familyOf = (model: string): Family =>
+  FAMILIES.find(f => f !== 'other' && model.startsWith(`claude-${f}`)) ?? 'other'
 
 // Longest prefix first, so claude-opus-5-5 never matches claude-opus-5.
 const BY_LENGTH = [...RATES].sort((a, b) => b[0].length - a[0].length)

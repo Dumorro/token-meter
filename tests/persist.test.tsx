@@ -33,6 +33,11 @@ const WEEK_ROWS = [
   row('claude-sonnet-5-5', 3_030, 181_875_897, 10_729_807, 109_849, 214_034, 1_514),
   row('<synthetic>', 0, 0, 0, 0, 0, 7),
 ]
+const ACCOUNT_ROWS = [
+  row('claude-opus-5-5', 90_000, 9_000_000_000, 100_000_000, 40_000_000, 20_000_000, 40_000),
+  row('claude-sonnet-5-5', 1_000, 5_000_000, 0, 0, 100_000, 300),
+]
+const OLDEST = Date.parse('2026-09-17T20:11:21Z')
 
 const result = (exitCode: number, stdout: string) => ({
   exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false,
@@ -74,7 +79,10 @@ const engine = (on: On, opts: Opts) => {
     argvs.push(e.argv)
     if (!opts.tools) return { value: result(127, '') }
 
-    return { value: result(0, JSON.stringify(e.argv[0] === 'jq' ? SESSION_ROWS : WEEK_ROWS)) }
+    if (e.argv[0] === 'jq') return { value: result(0, JSON.stringify(SESSION_ROWS)) }
+    if (e.argv[2]?.includes('stat -f')) return { value: result(0, `${OLDEST / 1000}\n${JSON.stringify(ACCOUNT_ROWS)}`) }
+
+    return { value: result(0, JSON.stringify(WEEK_ROWS)) }
   })
   on('session.start', async (_, e) => ({ cwd: e.cwd }))
 
@@ -103,11 +111,17 @@ describe('token-meter persistence', () => {
     expect(session).toContain('Written  68.8k')
     expect(session).toContain('Cost     $7.80 (estimated, API pricing)')
     expect(session).toContain('86 API responses · includes subagents · transcript')
+    expect(session).toContain('opus        $7.80 · 15.00M tok · 86 resp')
+    expect(session).not.toContain('sonnet')
     expect(weekly).toContain('Read     3.13B')
     expect(weekly).toContain('Total    3.13B')
     expect(weekly).toContain('Cost     $1116.65')
     expect(weekly).toContain('14449 API responses · all projects')
     expect(weekly).not.toContain('unpriced')
+    expect(weekly).toContain('opus     $1051.14 · 2.94B tok · 12928 resp')
+    expect(weekly).toContain('sonnet     $65.51 · 192.82M tok · 1514 resp')
+    // The zero-token <synthetic> row is not a family line.
+    expect(weekly).not.toContain('other')
 
     const jq = argvs.find(a => a[0] === 'jq')
     expect(jq?.slice(-2)).toEqual([`${DIR}/${SID}.jsonl`, `${DIR}/${SID}/subagents/agent-a.jsonl`])
@@ -117,6 +131,27 @@ describe('token-meter persistence', () => {
     expect(sh?.[5]).toBe(String(Math.ceil((NOW - (WEEK_RESET - 7 * 86_400_000)) / 60_000) + 60))
     expect((store.get(`session:${SID}`) as { usd: number }).usd.toFixed(4)).toBe('7.8042')
     expect((store.get('week') as { totals: { usd: number } }).totals.usd.toFixed(2)).toBe('1116.65')
+  })
+
+  test('the account total sums every transcript on disk, with no time filter, and is saved', async ($, on) => {
+    const { argvs, clock, store } = engine(on, { tools: true })
+    await start($)
+    await clock.settle()
+
+    const account = (await shown($)).split('Account total')[1] ?? ''
+    expect(account).toContain(' (since ')
+    expect(account).toContain('Read     9.11B')
+    expect(account).toContain('Written  20.10M')
+    expect(account).toContain('40300 API responses · all projects · transcripts on disk')
+    expect(account).toContain('sonnet ')
+    expect(account).not.toContain('calculating')
+
+    const sh = argvs.find(a => a[0] === 'sh' && a[2]?.includes('stat -f'))
+    expect(sh?.[2]).not.toContain('-mmin')
+    expect(sh?.[4]).toBe(`${HOME}/.claude/projects`)
+    const saved = store.get('account') as { oldest: number; totals: { turns: number } }
+    expect(saved.oldest).toBe(OLDEST)
+    expect(saved.totals.turns).toBe(40_300)
   })
 
   test('without jq a restart falls back to the saved totals', async ($, on) => {
@@ -143,6 +178,8 @@ describe('token-meter persistence', () => {
     expect(session).toContain('4 API responses · includes subagents · saved')
     expect(weekly).toContain('Read     9.0k')
     expect(weekly).toContain('Cost     $0.50')
+    // Saved totals from before the split have no family lines, and still render.
+    expect(weekly).not.toContain(' tok · ')
   })
 
   test('a model without a price is named instead of counted as free', async ($, on) => {
@@ -153,6 +190,7 @@ describe('token-meter persistence', () => {
       await clock.settle()
       const weekly = (await shown($)).split('Weekly (since ')[1] ?? ''
       expect(weekly).toContain('unpriced: claude-unknown-9')
+      expect(weekly).toContain('other       $0.00 · 20 tok · 1 resp')
     } finally {
       WEEK_ROWS.pop()
     }

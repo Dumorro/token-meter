@@ -1,7 +1,9 @@
 # token-meter
 
 A Claude Code mod that opens a pane with the tokens read and written in the current session and
-over the week (across all projects), the estimated cost at API prices, the context window fill,
+over the week (across all projects), the account total (every transcript still on disk under
+`~/.claude/projects`, rescanned every 30 minutes), the estimated cost at API prices (total and per model family:
+fable, opus, sonnet, haiku, other), the context window fill,
 and the usage limits (5h, weekly) with the time left until each reset.
 
 ## Install

@@ -1,18 +1,20 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren, SessionContextUsage } from 'claude-code'
 
-import type { Limit, Source, Totals, Week, Window } from '../types'
+import type { Account, Limit, Source, Totals, Week, Window } from '../types'
 
 import { costOf } from './pricing'
 import type { ModelUsage } from './pricing'
-import { AGGREGATE, EMPTY, summarize } from './usage'
+import { addFamily, AGGREGATE, EMPTY, summarize } from './usage'
 
 const PANE = 'token-meter'
 const WEEK_MS = 7 * 86_400_000
 const WEEK_EVERY_MS = 10 * 60_000
+const ACCOUNT_EVERY_MS = 30 * 60_000
 
 const totals = atom({ plugin: 'token-meter', key: 'totals' } as const, EMPTY)
 const week = atom({ plugin: 'token-meter', key: 'week' } as const, null as Week | null)
+const account = atom({ plugin: 'token-meter', key: 'account' } as const, null as Account | null)
 const source = atom({ plugin: 'token-meter', key: 'source' } as const, 'live' as Source)
 const window = atom({ plugin: 'token-meter', key: 'window' } as const, null)
 const usd = atom({ plugin: 'token-meter', key: 'usd' } as const, null)
@@ -20,13 +22,19 @@ const limits = atom({ plugin: 'token-meter', key: 'limits' } as const, [] as Lim
 
 const STORE_PREFIX = 'session:'
 const STORE_WEEK = 'week'
+const STORE_ACCOUNT = 'account'
 const STORE_KEEP = 200
 
 const projectKey = (dir: string) => dir.replace(/[^A-Za-z0-9]/g, '-')
 const projectsDir = async ($: EngineInterface) => `${(await $.env.get('HOME')) ?? ''}/.claude/projects`
 
-// Saved totals from before usd existed lack it; treat them as tokens without a price.
-const withDefaults = (t: Partial<Totals>): Totals => ({ ...EMPTY, ...t, unpricedModels: t.unpricedModels ?? [] })
+// Saved totals from before usd or the per-family split existed lack them; treat them as tokens without a price.
+const withDefaults = (t: Partial<Totals>): Totals => ({
+  ...EMPTY,
+  ...t,
+  byFamily: t.byFamily ?? [],
+  unpricedModels: t.unpricedModels ?? [],
+})
 
 async function transcriptFiles($: EngineInterface, sessionId: string): Promise<string[]> {
   const projects = await projectsDir($)
@@ -84,6 +92,20 @@ async function scanWeek($: EngineInterface, since: number, now: number): Promise
   return summarize(JSON.parse(r.stdout) as ModelUsage[])
 }
 
+// Every session of every project still on disk, no time filter; the first stdout line is the
+// oldest transcript's mtime in seconds, the second the aggregate.
+async function scanAccount($: EngineInterface): Promise<Omit<Account, 'at'> | null> {
+  const script =
+    'oldest=$(find "$1" -name "*.jsonl" -exec stat -f %m {} + | sort -n | head -1); echo "${oldest:-0}"; ' +
+    'find "$1" -name "*.jsonl" -print0 | xargs -0 grep -h -F \'"type":"assistant"\' | jq -ncR --arg since "" "$2"'
+  const r = await $.process.run(['sh', '-c', script, 'sh', await projectsDir($), AGGREGATE], { timeoutMs: 300_000 })
+  if (r.exitCode !== 0) return null
+  const [first, ...rest] = r.stdout.split('\n')
+  const oldest = Number(first) * 1000
+
+  return { oldest: oldest > 0 ? oldest : null, totals: summarize(JSON.parse(rest.join('\n')) as ModelUsage[]) }
+}
+
 async function saveSession($: EngineInterface, t: Totals) {
   await $.store.set(`${STORE_PREFIX}${await $.session.id()}`, t)
   const keys = (await $.store.keys()).filter(k => k.startsWith(STORE_PREFIX))
@@ -92,6 +114,7 @@ async function saveSession($: EngineInterface, t: Totals) {
 
 let isScanning = false
 let isScanningWeek = false
+let isScanningAccount = false
 
 async function refreshSession($: EngineInterface) {
   if (isScanning) return
@@ -137,6 +160,23 @@ async function refreshWeek($: EngineInterface) {
   }
 }
 
+async function refreshAccount($: EngineInterface) {
+  if (isScanningAccount) return
+  isScanningAccount = true
+  try {
+    const a = await scanAccount($)
+    if (a) {
+      const value: Account = { ...a, at: await $.clock.now() }
+      await update($, account, () => value)
+      await $.store.set(STORE_ACCOUNT, value)
+    }
+  } catch {
+    // keep what is shown; the next period retries
+  } finally {
+    isScanningAccount = false
+  }
+}
+
 const fmt = (n: number) =>
   n >= 1_000_000_000
     ? `${(n / 1_000_000_000).toFixed(2)}B`
@@ -174,6 +214,15 @@ const until = (resetsAt: string | undefined, now: number) => {
 
 const limitColor = (used: number) => (used >= 85 ? 'red' : used >= 60 ? 'yellow' : 'green')
 
+const BAR_MAX = 40
+
+// Cells of the usage bar: filled for the used share, rounded, clamped to [0, width].
+const barCells = (used: number, width: number) => {
+  const filled = Math.min(width, Math.max(0, Math.round((used / 100) * width)))
+
+  return { filled: '█'.repeat(filled), empty: '░'.repeat(width - filled) }
+}
+
 const toWindow = (c: SessionContextUsage): Window => ({
   tokens: c.tokens ?? null,
   size: c.window,
@@ -193,13 +242,17 @@ export const register: Register = on => {
     }
     const savedWeek = (await $.store.get(STORE_WEEK)) as Week | undefined
     if (savedWeek) await update($, week, () => ({ ...savedWeek, totals: withDefaults(savedWeek.totals) }))
+    const savedAccount = (await $.store.get(STORE_ACCOUNT)) as Account | undefined
+    if (savedAccount) await update($, account, () => ({ ...savedAccount, totals: withDefaults(savedAccount.totals) }))
     const usage = await $.session.usage()
     await update($, window, () => toWindow(usage.context))
     await update($, usd, () => usage.cost?.usd ?? null)
     await update($, limits, () => usage.rateLimits)
     void refreshSession($)
-    void refreshWeek($)
     $.clock.every(WEEK_EVERY_MS, () => void refreshWeek($))
+    // The week scan goes first: both read every project, and the account one reads all of it.
+    void refreshWeek($).then(() => refreshAccount($))
+    $.clock.every(ACCOUNT_EVERY_MS, () => void refreshAccount($))
     void $.ui.open({ id: PANE, title: 'Tokens' })
 
     return next(e)
@@ -233,6 +286,13 @@ export const register: Register = on => {
         output: t.output + u.output_tokens,
         turns: t.turns + 1,
         usd: t.usd + turnUsd,
+        byFamily: addFamily(
+          t.byFamily,
+          u.model,
+          u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens + u.output_tokens,
+          turnUsd,
+          1,
+        ),
       }))
       await saveSession($, t)
     }
@@ -264,11 +324,13 @@ export const register: Register = on => {
     const { Box, Text } = $.ui.resolve(e)
     const t = await read($, totals)
     const wk = await read($, week)
+    const acct = await read($, account)
     const from = await read($, source)
     const w = await read($, window)
     const cost = await read($, usd)
     const rate = await read($, limits)
     const now = await $.clock.now()
+    const barWidth = Math.max(10, Math.min(BAR_MAX, e.props.bodyColumns - 4))
 
     const block = (x: Totals, note: RenderChildren) => {
       const readTotal = x.input + x.cacheRead + x.cacheWrite
@@ -282,6 +344,11 @@ export const register: Register = on => {
           <Text>  Written  {fmt(x.output)}</Text>
           <Text>  Total    {fmt(readTotal + x.output)}</Text>
           <Text color="cyan">  Cost     {money(x.usd)} (estimated, API pricing)</Text>
+          {x.byFamily.map(f => (
+            <Text dimColor>
+              {`    ${f.family.padEnd(7)} ${money(f.usd).padStart(9)} · ${fmt(f.tokens)} tok · ${f.responses} resp`}
+            </Text>
+          ))}
           {x.unpricedModels.length > 0 && (
             <Text dimColor>    unpriced: {x.unpricedModels.join(', ')}</Text>
           )}
@@ -308,6 +375,13 @@ export const register: Register = on => {
           <Text dimColor>  calculating…</Text>
         )}
         <Text> </Text>
+        <Text bold>Account total{acct?.oldest ? ` (since ${ddmm(acct.oldest)})` : ''}</Text>
+        {acct ? (
+          block(acct.totals, `all projects · transcripts on disk · updated ${ddmm(acct.at)}`)
+        ) : (
+          <Text dimColor>  calculating…</Text>
+        )}
+        <Text> </Text>
         <Text bold>Context window</Text>
         {w === null || w.tokens === null ? (
           <Text dimColor>  waiting for first response</Text>
@@ -321,13 +395,24 @@ export const register: Register = on => {
         <Text> </Text>
         <Text bold>Limits</Text>
         {rate.length === 0 && <Text dimColor>  no reading yet</Text>}
-        {rate.map(l => (
-          <Text color={limitColor(l.percentUsed)}>
-            {'  '}
-            {LIMIT_LABEL[l.kind] ?? l.kind}: {Math.max(0, Math.round((100 - l.percentUsed) * 10) / 10)}% free (
-            {l.percentUsed}% used){until(l.resetsAt, now)}
-          </Text>
-        ))}
+        {rate.map(l => {
+          const bar = barCells(l.percentUsed, barWidth)
+
+          return (
+            <Box flexDirection="column">
+              <Text color={limitColor(l.percentUsed)}>
+                {'  '}
+                {LIMIT_LABEL[l.kind] ?? l.kind}: {Math.max(0, Math.round((100 - l.percentUsed) * 10) / 10)}% free (
+                {l.percentUsed}% used){until(l.resetsAt, now)}
+              </Text>
+              <Box flexDirection="row">
+                <Text>{'  '}</Text>
+                <Text color={limitColor(l.percentUsed)}>{bar.filled}</Text>
+                <Text dimColor>{bar.empty}</Text>
+              </Box>
+            </Box>
+          )
+        })}
       </Box>
     )
   })
